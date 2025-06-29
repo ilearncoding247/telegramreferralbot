@@ -424,17 +424,76 @@ class TelegramReferralBot:
     async def handle_callback(self, update: Update, context):
         """Handle inline keyboard callbacks."""
         query = update.callback_query
-        await query.answer()
+        try:
+            await query.answer()
+        except Exception as e:
+            logger.warning(f"Could not answer callback query: {e}")
         
         if query.data == "status":
-            await self.status_command(update, context)
+            # Send status directly to the callback query
+            await query.edit_message_text(
+                text="📊 Checking your referral status...",
+                reply_markup=None
+            )
+            await self._send_status_to_callback(query, context)
         elif query.data == "claim":
             await self.claim_command(update, context)
         elif query.data == "help":
-            await self.help_command(update, context)
+            await self._send_help_to_callback(query, context)
         elif query.data.startswith("claim_"):
             channel_id = int(query.data.split("_")[1])
             await self._process_reward_claim(update, channel_id)
+    
+    async def _send_status_to_callback(self, query, context):
+        """Send status response to callback query."""
+        user_id = query.from_user.id
+        
+        # Get all channels
+        all_channels = self.data_manager.get_all_channels()
+        
+        if not all_channels:
+            await query.edit_message_text(
+                text="❌ No channels found. The bot needs to be added to channels first."
+            )
+            return
+        
+        status_text = "📊 **Your Referral Status:**\n\n"
+        
+        for channel_id, channel_info in all_channels.items():
+            channel_name = channel_info.get('name', f'Channel {channel_id}')
+            progress = self.referral_manager.get_user_progress(user_id, int(channel_id))
+            
+            status_text += f"🏢 **{channel_name}**\n"
+            status_text += f"   └ Referrals: {progress['successful_referrals']}/{self.config.REFERRAL_TARGET}\n"
+            status_text += f"   └ Rewards claimed: {progress['rewards_claimed']}\n"
+            
+            if progress['can_claim_reward']:
+                status_text += f"   └ ✅ Ready to claim reward!\n"
+            else:
+                remaining = self.config.REFERRAL_TARGET - progress['successful_referrals']
+                status_text += f"   └ 🎯 Need {remaining} more referrals\n"
+            
+            status_text += "\n"
+        
+        await query.edit_message_text(text=status_text, parse_mode='Markdown')
+    
+    async def _send_help_to_callback(self, query, context):
+        """Send help response to callback query."""
+        help_text = (
+            "🤖 **Telegram Referral Bot Help**\n\n"
+            "**Commands:**\n"
+            "• `/start` - Get your referral link\n"
+            "• `/status` - Check your progress\n"
+            "• `/claim` - Claim your rewards\n"
+            "• `/help` - Show this help message\n\n"
+            "**How it works:**\n"
+            "🔸 Get invited to channels and earn rewards\n"
+            "🔸 Share your referral links to invite others\n"
+            "🔸 Track your progress and claim rewards\n\n"
+            "Need help? Contact the channel admin!"
+        )
+        
+        await query.edit_message_text(text=help_text, parse_mode='Markdown')
     
     async def _process_reward_claim(self, update: Update, channel_id: int):
         """Process a reward claim."""

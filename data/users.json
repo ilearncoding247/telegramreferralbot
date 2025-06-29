@@ -2,11 +2,11 @@
   "7221308385": {
     "channels": {
       "-1001817773133": {
-        "pending_welcome": true,
-        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDcyMjEzMDgzODUsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkxNTg2LCAiaGFzaCI6ICIyOWU2M2Q4YSJ9"
+        "pending_welcome": false,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDcyMjEzMDgzODUsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkzNTU4LCAiaGFzaCI6ICI1ZmM3Mjg0YiJ9"
       }
     },
-    "last_updated": 1751191587
+    "last_updated": 1751193624
   },
   "7205961765": {
     "channels": {
@@ -43,5 +43,23 @@
       }
     },
     "last_updated": 1751192241
+  },
+  "7473851705": {
+    "channels": {
+      "-1001817773133": {
+        "pending_welcome": true,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDc0NzM4NTE3MDUsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkzNjA2LCAiaGFzaCI6ICI2ODQxNWE2MiJ9"
+      }
+    },
+    "last_updated": 1751193607
+  },
+  "7668092294": {
+    "channels": {
+      "-1001817773133": {
+        "pending_welcome": true,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDc2NjgwOTIyOTQsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkzNzY3LCAiaGFzaCI6ICI4NTJmZjBjNSJ9"
+      }
+    },
+    "last_updated": 1751193767
   }
 }
