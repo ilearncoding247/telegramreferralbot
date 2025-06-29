@@ -28,9 +28,14 @@ class ReferralManager:
         # Store referral data
         self.data_manager.store_referral_code(referral_code, user_id, channel_id)
         
-        # Create the bot link
-        bot_username = self.config.BOT_USERNAME
-        referral_link = f"https://t.me/{bot_username}?start={referral_code}"
+        # For TeenzMovement channel, use the actual channel invite link
+        if channel_id == -1001817773133:  # TeenzMovement channel ID
+            # Create a trackable channel invite link
+            referral_link = f"https://t.me/TeenzMovement?start={referral_code}"
+        else:
+            # For other channels, create bot link
+            bot_username = self.config.BOT_USERNAME
+            referral_link = f"https://t.me/{bot_username}?start={referral_code}"
         
         logger.info(f"Generated referral link for user {user_id} in channel {channel_id}")
         return referral_link

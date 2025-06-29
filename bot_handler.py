@@ -310,13 +310,14 @@ class TelegramReferralBot:
             except Exception as e:
                 logger.error(f"Failed to notify referrer {referrer_id}: {e}")
         
-        # Generate referral link for the new user
-        referral_link = self.referral_manager.generate_referral_link(user_id, chat_id)
+        # Generate REAL channel invite link for the new user
+        referral_link = await self._create_trackable_invite_link(user_id, chat_id)
         
         # Send welcome message with referral link
         try:
+            channel_name = self.data_manager.get_channel_info(chat_id).get('name', 'the channel')
             welcome_message = (
-                f"🎉 Welcome to the channel!\n\n"
+                f"🎉 Welcome to {channel_name}!\n\n"
                 f"🔗 Here's your unique referral link:\n"
                 f"`{referral_link}`\n\n"
                 f"Share this link to invite {self.config.REFERRAL_TARGET} friends "
@@ -339,6 +340,62 @@ class TelegramReferralBot:
             user_data['channels'][channel_key]['pending_welcome'] = True
             user_data['channels'][channel_key]['referral_link'] = referral_link
             self.data_manager.save_user_data(user_id, user_data)
+    
+    async def _create_trackable_invite_link(self, user_id: int, chat_id: int) -> str:
+        """Create a trackable invite link for the channel that actually invites people to the channel."""
+        try:
+            # Create a unique invite link for this user
+            invite_link = await self.application.bot.create_chat_invite_link(
+                chat_id=chat_id,
+                name=f"Referral-{user_id}",  # Name to identify this link
+                member_limit=10000,  # High limit to allow many joins
+                creates_join_request=False  # Direct join, no approval needed
+            )
+            
+            # Store the referral mapping
+            referral_code = utils.generate_referral_code(user_id, chat_id)
+            self.data_manager.store_referral_code(referral_code, user_id, chat_id)
+            
+            # Store the invite link mapping for tracking
+            self._store_invite_link_mapping(invite_link.invite_link, user_id, chat_id, referral_code)
+            
+            logger.info(f"Created trackable invite link for user {user_id} in channel {chat_id}")
+            return invite_link.invite_link
+            
+        except Exception as e:
+            logger.error(f"Failed to create invite link: {e}")
+            # Fallback to bot link if invite link creation fails
+            return self.referral_manager.generate_referral_link(user_id, chat_id)
+    
+    def _store_invite_link_mapping(self, invite_link: str, user_id: int, chat_id: int, referral_code: str):
+        """Store the mapping between invite link and user for tracking."""
+        try:
+            import json
+            import os
+            
+            mapping_file = "data/invite_links.json"
+            
+            # Load existing mappings
+            if os.path.exists(mapping_file):
+                with open(mapping_file, 'r') as f:
+                    mappings = json.load(f)
+            else:
+                mappings = {}
+            
+            # Store new mapping
+            mappings[invite_link] = {
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "referral_code": referral_code,
+                "created_at": utils.get_current_timestamp()
+            }
+            
+            # Save mappings
+            with open(mapping_file, 'w') as f:
+                json.dump(mappings, f, indent=2)
+                
+        except Exception as e:
+            logger.error(f"Failed to store invite link mapping: {e}")
     
     async def _handle_user_leave(self, chat_id: int, user_id: int):
         """Handle when a user leaves a channel."""
