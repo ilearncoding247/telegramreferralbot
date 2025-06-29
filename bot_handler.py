@@ -57,6 +57,36 @@ class TelegramReferralBot:
         
         # Regular start command
         if chat.type == 'private':
+            # Check for pending welcome messages
+            user_data = self.data_manager.get_user_data(user.id)
+            pending_messages = []
+            
+            if user_data and user_data.get('channels'):
+                for channel_id, channel_data in user_data['channels'].items():
+                    if channel_data.get('pending_welcome'):
+                        channel_info = self.data_manager.get_channel_info(channel_id)
+                        channel_name = channel_info.get('name', 'Unknown Channel') if channel_info else 'Unknown Channel'
+                        referral_link = channel_data.get('referral_link', '')
+                        
+                        if referral_link:
+                            pending_message = (
+                                f"🎉 Welcome to {channel_name}!\n\n"
+                                f"🔗 Here's your unique referral link:\n"
+                                f"`{referral_link}`\n\n"
+                                f"Share this link to invite {self.config.REFERRAL_TARGET} friends "
+                                f"and earn rewards!\n\n"
+                            )
+                            pending_messages.append(pending_message)
+                            
+                            # Mark as sent
+                            channel_data['pending_welcome'] = False
+                            self.data_manager.save_user_data(user.id, user_data)
+            
+            # Send pending messages first
+            for msg in pending_messages:
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            
+            # Send main welcome message
             welcome_message = (
                 f"🎉 Welcome to the Referral Bot, {user.first_name}!\n\n"
                 "I help you manage referral systems for Telegram channels.\n\n"
@@ -300,7 +330,15 @@ class TelegramReferralBot:
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
-            logger.error(f"Failed to send welcome message to user {user_id}: {e}")
+            logger.warning(f"Could not send welcome message to user {user_id} - they need to start the bot first: {e}")
+            # Store the referral link to send later when they start the bot
+            user_data = self.data_manager.get_user_data(user_id) or {'channels': {}}
+            channel_key = str(chat_id)
+            if channel_key not in user_data['channels']:
+                user_data['channels'][channel_key] = {}
+            user_data['channels'][channel_key]['pending_welcome'] = True
+            user_data['channels'][channel_key]['referral_link'] = referral_link
+            self.data_manager.save_user_data(user_id, user_data)
     
     async def _handle_user_leave(self, chat_id: int, user_id: int):
         """Handle when a user leaves a channel."""
