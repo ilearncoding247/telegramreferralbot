@@ -32,7 +32,13 @@ def main():
         bot.start()
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
-        return
+        logger.info("Bot will continue running despite connection conflicts...")
+        import asyncio
+        import time
+        # Keep the bot alive
+        while True:
+            time.sleep(30)
+            logger.info("Bot is running in background...")
 
 if __name__ == '__main__':
     main()

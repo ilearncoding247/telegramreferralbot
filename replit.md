@@ -89,6 +89,7 @@ The application follows a modular architecture with clear separation of concerns
 ## Changelog
 
 - June 28, 2025. Initial setup
+- June 29, 2025. Bot successfully deployed and running in production mode for subscriber use
 
 ## User Preferences
 

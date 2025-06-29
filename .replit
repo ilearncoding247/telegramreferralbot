@@ -13,12 +13,12 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Telegram Bot"
+args = "Production Bot"
 
 [[workflows.workflow]]
-name = "Telegram Bot"
+name = "Production Bot"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pip install python-telegram-bot && python main.py"
+args = "python main.py"
