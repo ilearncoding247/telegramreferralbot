@@ -1,1 +1,20 @@
-{}
+{
+  "7221308385": {
+    "channels": {
+      "-1001817773133": {
+        "pending_welcome": true,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDcyMjEzMDgzODUsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkwNjg2LCAiaGFzaCI6ICI2NTJmZDA2MyJ9"
+      }
+    },
+    "last_updated": 1751190686
+  },
+  "7205961765": {
+    "channels": {
+      "-1001817773133": {
+        "pending_welcome": true,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDcyMDU5NjE3NjUsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkxMTA5LCAiaGFzaCI6ICI3YjRlNjNmZCJ9"
+      }
+    },
+    "last_updated": 1751191109
+  }
+}
