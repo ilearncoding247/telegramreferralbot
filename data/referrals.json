@@ -28,5 +28,15 @@
     "user_id": 7221308385,
     "channel_id": -1001817773133,
     "created_at": 1751191586
+  },
+  "eyJyZWZlcnJlcl9pZCI6IDgwNjIyNzA4NzQsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkyMDAwLCAiaGFzaCI6ICJmOTcxZjg4NCJ9": {
+    "user_id": 8062270874,
+    "channel_id": -1001817773133,
+    "created_at": 1751192000
+  },
+  "eyJyZWZlcnJlcl9pZCI6IDcxOTEyMzAzNjksICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkyMjQxLCAiaGFzaCI6ICIzZWM2MTE4ZiJ9": {
+    "user_id": 7191230369,
+    "channel_id": -1001817773133,
+    "created_at": 1751192241
   }
 }

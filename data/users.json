@@ -25,5 +25,23 @@
       }
     },
     "last_updated": 1751191395
+  },
+  "8062270874": {
+    "channels": {
+      "-1001817773133": {
+        "pending_welcome": true,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDgwNjIyNzA4NzQsICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkyMDAwLCAiaGFzaCI6ICJmOTcxZjg4NCJ9"
+      }
+    },
+    "last_updated": 1751192000
+  },
+  "7191230369": {
+    "channels": {
+      "-1001817773133": {
+        "pending_welcome": true,
+        "referral_link": "https://t.me/@userreferral_bot?start=eyJyZWZlcnJlcl9pZCI6IDcxOTEyMzAzNjksICJjaGFubmVsX2lkIjogLTEwMDE4MTc3NzMxMzMsICJ0aW1lc3RhbXAiOiAxNzUxMTkyMjQxLCAiaGFzaCI6ICIzZWM2MTE4ZiJ9"
+      }
+    },
+    "last_updated": 1751192241
   }
 }
