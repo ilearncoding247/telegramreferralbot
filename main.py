@@ -7,10 +7,12 @@ This bot manages referral systems for Telegram channels.
 import os
 import logging
 from bot_handler import TelegramReferralBot
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+# Load environment variables (optional in prod, vital in dev)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Configure logging
 logging.basicConfig(
