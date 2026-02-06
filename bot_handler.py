@@ -4,11 +4,12 @@ Handles all bot commands and user interactions.
 """
 
 import logging
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ChatMemberHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 from referral_manager import ReferralManager
-from data_manager import DataManager
+from supabase_manager import SupabaseManager
 from config import Config
 import utils
 
@@ -20,11 +21,22 @@ class TelegramReferralBot:
     def __init__(self, token: str):
         """Initialize the bot with the given token."""
         self.token = token
-        self.application = Application.builder().token(token).build()
-        self.referral_manager = ReferralManager()
-        self.data_manager = DataManager()
+        self.application = Application.builder().token(token).post_init(self.post_init).build()
         self.config = Config()
+        
+        # Initialize Supabase Manager instead of DataManager
+        self.data_manager = SupabaseManager(self.config)
+        
+        # Inject dependency
+        self.referral_manager = ReferralManager(data_manager=self.data_manager)
+        
         self._setup_handlers()
+
+    async def post_init(self, application: Application):
+        """Post-initialization hook."""
+        # clear existing commands to force button usage
+        await application.bot.delete_my_commands()
+        logger.info("Cleared bot commands to enforce button usage.")
     
     def _setup_handlers(self):
         """Set up all command and message handlers."""
@@ -33,25 +45,149 @@ class TelegramReferralBot:
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("claim", self.claim_command))
+        self.application.add_handler(CommandHandler("mylink", self.mylink_command))
         self.application.add_handler(CommandHandler("admin", self.admin_command))
         
-        # Chat member handler for tracking joins/leaves
+        self.application.add_handler(CommandHandler("check", self.check_command))
+        
+        # Handle metrics and tracking
         self.application.add_handler(ChatMemberHandler(self.track_chat_member, ChatMemberHandler.CHAT_MEMBER))
         
-        # Callback query handler for inline keyboards
-        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+        # Fallback handler for dynamic channel commands (e.g. /MyChannelName)
+        # We capture text messages starting with '/' that aren't other commands
+        self.application.add_handler(MessageHandler(filters.COMMAND, self.dynamic_channel_command))
+
+    async def dynamic_channel_command(self, update: Update, context):
+        """Handle dynamic commands that match channel names."""
+        command = update.message.text.split()[0][1:] # Remove leading '/'
+        normalized_cmd = command.lower().replace(" ", "")
         
-        # Message handler for processing referral links
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-    
+        # Search for matching channel
+        all_channels = self.data_manager.get_all_channels()
+        target_channel_id = None
+        target_channel_name = None
+        
+        for c_id, c_data in all_channels.items():
+            c_name = c_data.get('name', '')
+            # Normalize channel name: remove spaces, lowercase
+            normalized_name = c_name.lower().replace(" ", "")
+            
+            if normalized_name == normalized_cmd:
+                target_channel_id = int(c_id)
+                target_channel_name = c_name
+                break
+        
+        if target_channel_id:
+            # Found a matching channel! Show stats.
+            await self._show_detailed_channel_stats(update, target_channel_id, target_channel_name)
+        else:
+            # Unknown command
+            # Since this catches ALL unknown commands, we should be careful.
+            # But the user asked for this.
+            pass # Silent ignore or generic help? Silent is safer to avoid spam.
+
+    async def _show_detailed_channel_stats(self, update: Update, channel_id: int, channel_name: str):
+        """Show detailed stats for a specific channel (used by dynamic command)."""
+        # Security: Only allow admins to check ANY channel? 
+        # Or normal users to check THEIR status?
+        # Context suggests User wants to check "EarnPRO Elites Channel" stats.
+        # Assuming they want THEIR stats in that channel, OR overall admin stats if they are admin?
+        # User request: "manual way /earnproeliteschannel" -> likely implied "Status for this channel".
+        
+        user_id = update.effective_user.id
+        
+        # Check permissions - is user an admin of that channel? 
+        # Hard to check remotely without querying TG API which requires user to be in chat.
+        # Let's assume this is for "My Status in Channel X" unless Super Admin.
+        
+        is_super_admin = (user_id == self.config.SUPER_ADMIN_ID)
+        
+        if is_super_admin:
+            # Show Admin Stats
+            channel_stats = self.referral_manager.get_channel_stats(channel_id)
+            text = (
+                f"🔧 *Channel Stats: {channel_name}*\n\n"
+                f"👥 Total Users: {channel_stats.get('total_users', 0)}\n"
+                f"🗣️ Active Referrers: {channel_stats.get('active_referrers', 0)}\n"
+                f"🔗 Total Referrals: {channel_stats.get('total_referrals', 0)}\n"
+            )
+        else:
+            # Show User Stats
+            progress = self.referral_manager.get_user_progress(user_id, channel_id)
+            if not progress:
+                text = f"📊 You have no data for *{channel_name}*."
+            else:
+                refs = progress.get('successful_referrals', 0)
+                target = self.config.REFERRAL_TARGET
+                text = (
+                    f"📊 *Your Status in {channel_name}*\n\n"
+                    f"👥 Referrals: {refs}/{target}\n"
+                    f"🎁 Rewards: {progress.get('rewards_claimed', 0)}\n"
+                )
+        
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+    async def check_command(self, update: Update, context):
+        """Debug command to check invite links."""
+        user = update.effective_user
+        
+        # Load mappings
+        try:
+            import json
+            import os
+            mapping_file = "data/invite_links.json"
+            if not os.path.exists(mapping_file):
+                await update.message.reply_text("❌ No invite links found.")
+                return
+                
+            with open(mapping_file, 'r') as f:
+                mappings = json.load(f)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error loading data: {e}")
+            return
+
+        # Find user's links
+        user_links = []
+        for link, data in mappings.items():
+            if data.get('user_id') == user.id:
+                user_links.append(link)
+        
+        if not user_links:
+            await update.message.reply_text("⚠️ You have no tracked invite links in the database.")
+            return
+            
+        message = f"🔍 *Found {len(user_links)} links for you:*\n\n"
+        for link in user_links:
+            # We can't easily get the 'joined count' from Telegram API directly for a link without being the creator/admin 
+            # and using sensitive methods. 
+            # But we can show what we know.
+            message += f"🔗 `{link}`\n"
+            message += f"   Select this link to copy it.\n"
+            
+        message += "\nℹ️ If you invite someone and the count doesn't go up, make sure they are joining via this exact link."
+        
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
     async def start_command(self, update: Update, context):
         """Handle /start command."""
         user = update.effective_user
         chat = update.effective_chat
         
-        # Check if this is a referral link
+        # Check if this is a referral link or a deep link
         if context.args:
-            referral_code = context.args[0]
+            arg = context.args[0]
+            
+            # Handle "getlink_" deep link from the group button
+            if arg.startswith('getlink_'):
+                try:
+                    channel_id = int(arg.split('_')[1])
+                    await self._process_get_link(update, channel_id)
+                except (IndexError, ValueError):
+                    await update.message.reply_text("❌ Invalid link request.")
+                return
+            
+            # Handle referral code
+            referral_code = arg
             await self._handle_referral_join(update, referral_code)
             return
         
@@ -84,58 +220,91 @@ class TelegramReferralBot:
             
             # Send pending messages first
             for msg in pending_messages:
-                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
             
-            # Send main welcome message
+            # ENSURE USER HAS A REFERRAL LINK
+            target_channel_id = -1003869427941
+            referral_link = None
+            
+            # Check existing
+            channel_key = str(target_channel_id)
+            
+            # DEBUG LOGGING
+            if user_data:
+                logger.info(f"Start CMD | User: {user.id} | Keys: {list(user_data.get('channels', {}).keys())}")
+                if channel_key in user_data.get('channels', {}):
+                     existing = user_data['channels'][channel_key].get('referral_link')
+                     logger.info(f"Start CMD | Found existing link: {existing}")
+            
+            if user_data and user_data.get('channels') and channel_key in user_data['channels']:
+                referral_link = user_data['channels'][channel_key].get('referral_link')
+            
+            # Generate if missing
+            if not referral_link:
+                try:
+                    logger.info(f"Start CMD | No link found for {user.id}, generating new one.")
+                    # Remove member_limit to avoid "10k" label and use standard links
+                    referral_link = await self._create_trackable_invite_link(user.id, target_channel_id)
+                except Exception as e:
+                    logger.error(f"Error generating link in start command: {e}")
+                    referral_link = self.referral_manager.generate_referral_link(user.id, target_channel_id)
+
+            # Send main welcome message with the link
             welcome_message = (
-                f"🎉 Welcome to the Referral Bot, {user.first_name}!\n\n"
-                "I help you manage referral systems for Telegram channels.\n\n"
-                "🔹 Get invited to channels and earn rewards\n"
-                "🔹 Share your referral links to invite others\n"
-                "🔹 Track your progress and claim rewards\n\n"
-                "Use /help to see all available commands."
+                f"🎉 Welcome to the EarnPro Elites Team, {user.first_name}!\n\n"
+                f"Your journey to building a network starts here. 🌐\n\n"
+                f"🔗 *Here is your unique referral link:*\n"
+                f"`{referral_link}`\n\n"
+                f"1. Copy this link.\n"
+                f"2. Share it with your friends.\n"
+                f"3. When they join the channel, you get credit!\n\n"
+                f"🎯 Goal: Invite {self.config.REFERRAL_TARGET} friends to earn rewards.\n"
+                f"#YourReferralsYourNetwork"
             )
             
+            # Updated Buttons as per specific user request: Start, Status, Get Reward, Help
             keyboard = [
-                [InlineKeyboardButton("📊 My Status", callback_data="status")],
-                [InlineKeyboardButton("🎁 Claim Rewards", callback_data="claim")],
+                # "Start" is technically what we just did, but we can offer a button to re-generate/show link
+                [InlineKeyboardButton("🔗 Create Link / View Link", callback_data="start_link")], 
+                [InlineKeyboardButton("� My Link", callback_data="mylink")],
+                [InlineKeyboardButton("�📊 Status", callback_data="status")],
+                [InlineKeyboardButton("🎁 Get Reward", callback_data="claim")],
                 [InlineKeyboardButton("❓ Help", callback_data="help")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await update.message.reply_text(welcome_message, reply_markup=reply_markup)
+            await update.effective_message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         else:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "👋 Hi! I'm a referral bot. Add me as an admin to your channel to start using referral features!"
             )
     
     async def help_command(self, update: Update, context):
         """Handle /help command."""
+        target = self.config.REFERRAL_TARGET
         help_text = (
-            "🤖 *Referral Bot Help*\n\n"
-            "*Available Commands:*\n"
-            "• `/start` - Start the bot or join via referral link\n"
-            "• `/status` - Check your referral progress\n"
-            "• `/claim` - Claim your rewards\n"
-            "• `/help` - Show this help message\n"
-            "• `/admin` - Admin commands (channel admins only)\n\n"
-            "*How it works:*\n"
-            "1️⃣ Join a channel via referral link\n"
-            "2️⃣ Get your unique referral link\n"
-            "3️⃣ Share it to invite others\n"
-            "4️⃣ Earn rewards when people join!\n\n"
-            "*Need help?* Contact the channel admin."
+            "🤖 *Referral Bot Commands*\n\n"
+            "• `/start` - **Create/View Link**: Generates your unique referral link.\n"
+            "• `/status` - **Check Status**: Shows how many users have joined via your link.\n"
+            "• `/mylink` - **My Link**: Shows your unique referral link.\n"
+            "• `/claim` - **Get Reward**: If you have referrals, tells you how to redeem.\n"
+            "• `/help` - **Help**: Shows this explanation.\n\n"
+            "*How to Earn:*\n"
+            "1️⃣ Get your link with /start\n"
+            f"2️⃣ Invite {target} friends to the Channel\n"
+            "3️⃣ Use /claim to get redemption instructions!"
         )
         
-        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+        await update.effective_message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
     
     async def status_command(self, update: Update, context):
         """Handle /status command."""
         user_id = update.effective_user.id
         user_data = self.data_manager.get_user_data(user_id)
         
+        target_channel_id = -1003869427941
         if not user_data or not user_data.get('channels'):
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "📊 *Your Referral Status*\n\n"
                 "You haven't joined any channels yet.\n"
                 "Use a referral link to get started!",
@@ -145,90 +314,140 @@ class TelegramReferralBot:
         
         status_text = "📊 *Your Referral Status*\n\n"
         
-        for channel_id, channel_data in user_data['channels'].items():
-            channel_info = self.data_manager.get_channel_info(channel_id)
-            channel_name = channel_info.get('name', 'Unknown Channel') if channel_info else 'Unknown Channel'
+        # Track processed channels to avoid duplicates if ID migration happened
+        processed_channel_names = set()
+        has_primary_channel = False
+        
+        # Helper to process a channel
+        def add_channel_status(c_id, c_data):
+            c_info = self.data_manager.get_channel_info(c_id)
+            # Normalizing name for de-duplication
+            c_name = c_info.get('name', 'Unknown Channel') if c_info else 'Unknown Channel'
             
-            successful_referrals = channel_data.get('successful_referrals', 0)
-            target = self.config.REFERRAL_TARGET
-            rewards_claimed = channel_data.get('rewards_claimed', 0)
+            # If we've already displayed this channel name, skip (legacy ID fix)
+            if c_name in processed_channel_names:
+                return False
+                
+            processed_channel_names.add(c_name)
             
-            status_text += f"🔸 *{channel_name}*\n"
-            status_text += f"   • Referrals: {successful_referrals}/{target}\n"
-            status_text += f"   • Progress: {utils.get_progress_bar(successful_referrals, target)}\n"
-            status_text += f"   • Rewards claimed: {rewards_claimed}\n"
+            succ_referrals = c_data.get('successful_referrals', 0)
+            targ = self.config.REFERRAL_TARGET
+            rew_claimed = c_data.get('rewards_claimed', 0)
             
-            if successful_referrals >= target:
+            nonlocal status_text
+            status_text += f"🔸 *{c_name}*\n"
+            status_text += f"   • Referrals: {succ_referrals}/{targ}\n"
+            status_text += f"   • Progress: {utils.get_progress_bar(succ_referrals, targ)}\n"
+            status_text += f"   • Rewards claimed: {rew_claimed}\n"
+            
+            if succ_referrals >= targ:
                 status_text += "   • ✅ Ready to claim reward!\n"
             else:
-                remaining = target - successful_referrals
-                status_text += f"   • 🎯 Need {remaining} more referrals\n"
+                rem = targ - succ_referrals
+                status_text += f"   • 🎯 Need {rem} more referrals\n"
             
             status_text += "\n"
+            return True
+
+        # Loop through user channels
+        for channel_id, channel_data in user_data['channels'].items():
+            if str(channel_id) == str(target_channel_id):
+                has_primary_channel = True
+            add_channel_status(channel_id, channel_data)
+        
+        # If the user has data but NOT for the new primary ID, implies they are legacy.
+        # But if the loop above covered "EarnPro Elites Channel" via the old ID, `processed_channel_names` handles it.
+        # If nothing was added (e.g. data corrupt), add default.
+        if not processed_channel_names:
+             # Show default if new user with empty channels
+             status_text += f"🔶 *EarnPro Elites Channel*\n"
+             status_text += f"   • Referrals: 0/{self.config.REFERRAL_TARGET}\n"
+             status_text += f"   • Progress: {utils.get_progress_bar(0, self.config.REFERRAL_TARGET)}\n"
+             status_text += f"\n🎯 Need {self.config.REFERRAL_TARGET} more referrals to unlock rewards."
         
         keyboard = [
-            [InlineKeyboardButton("🎁 Claim Rewards", callback_data="claim")],
+            [InlineKeyboardButton("🎁 Get Reward", callback_data="claim")],
             [InlineKeyboardButton("🔄 Refresh", callback_data="status")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        await update.effective_message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     
     async def claim_command(self, update: Update, context):
         """Handle /claim command."""
         user_id = update.effective_user.id
         user_data = self.data_manager.get_user_data(user_id)
         
-        if not user_data or not user_data.get('channels'):
-            await update.message.reply_text(
-                "🎁 *Claim Rewards*\n\n"
-                "You haven't joined any channels yet.\n"
-                "Use a referral link to get started!",
-                parse_mode=ParseMode.MARKDOWN
+        target_channel_id = -1003869427941
+        channel_key = str(target_channel_id)
+        
+        successful_referrals = 0
+        
+        # Check new key first
+        if user_data and 'channels' in user_data:
+            if channel_key in user_data['channels']:
+                successful_referrals = user_data['channels'][channel_key].get('successful_referrals', 0)
+            else:
+                # Fallback check for any channel named "EarnPro Elites Channel" (Old ID)
+                # Since we want to honor referrals made on the old ID
+                for c_id, c_data in user_data['channels'].items():
+                     c_info = self.data_manager.get_channel_info(c_id)
+                     if c_info and c_info.get('name') == "EarnPro Elites Channel":
+                         successful_referrals = max(successful_referrals, c_data.get('successful_referrals', 0))
+        
+        target = self.config.REFERRAL_TARGET
+        
+        if successful_referrals >= target:
+            # ELIGIBLE
+            claim_text = (
+                "🏆 *Congratulations! You are eligible for rewards!* 🏆\n\n"
+                f"You have referred {successful_referrals} people.\n\n"
+                "👇 **HOW TO REDEEM:**\n"
+                "1. Log into your [EarnPro Dashboard](https://earnpro.org/dashboard).\n"
+                "2. Go to the 'Rewards' section.\n"
+                "3. Enter your Telegram Username or ID to verify.\n\n"
+                f"Your Telegram ID: `{user_id}`"
             )
-            return
-        
-        claimable_rewards = []
-        
-        for channel_id, channel_data in user_data['channels'].items():
-            successful_referrals = channel_data.get('successful_referrals', 0)
-            rewards_claimed = channel_data.get('rewards_claimed', 0)
+        else:
+            # NOT ELIGIBLE
+            remaining = target - successful_referrals
+            claim_text = (
+                "🔒 *Rewards Locked*\n\n"
+                f"You have referred {successful_referrals} people.\n"
+                f"You need **{target} referrals** to unlock rewards.\n\n"
+                f"Keep inviting! You only need {remaining} more!"
+            )
             
-            if successful_referrals >= self.config.REFERRAL_TARGET:
-                available_rewards = successful_referrals // self.config.REFERRAL_TARGET - rewards_claimed
-                if available_rewards > 0:
-                    channel_info = self.data_manager.get_channel_info(channel_id)
-                    channel_name = channel_info.get('name', 'Unknown Channel') if channel_info else 'Unknown Channel'
-                    claimable_rewards.append((channel_id, channel_name, available_rewards))
+        await update.effective_message.reply_text(claim_text, parse_mode=ParseMode.MARKDOWN)
+
+    async def mylink_command(self, update: Update, context):
+        """Handle /mylink command and button."""
+        user_id = update.effective_user.id
+        user_data = self.data_manager.get_user_data(user_id)
+        target_channel_id = -1003869427941
+        channel_key = str(target_channel_id)
         
-        if not claimable_rewards:
-            await update.message.reply_text(
-                "🎁 *Claim Rewards*\n\n"
-                "No rewards available to claim.\n"
-                "Keep inviting friends to earn rewards!",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
+        referral_link = None
+        if user_data and 'channels' in user_data and channel_key in user_data['channels']:
+            referral_link = user_data['channels'][channel_key].get('referral_link')
+            
+        if referral_link:
+             message = (
+                 f"🔗 *Your Unique Referral Link:*\n\n"
+                 f"`{referral_link}`\n\n"
+                 f"Tap to copy and share!"
+             )
+        else:
+             message = (
+                 "⚠️ You don't have a referral link yet.\n"
+                 "Use /start to generate one!"
+             )
         
-        # Create claim buttons
-        keyboard = []
-        for channel_id, channel_name, available_rewards in claimable_rewards:
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"🎁 Claim {available_rewards} reward(s) - {channel_name}",
-                    callback_data=f"claim_{channel_id}"
-                )
-            ])
-        
+        # Add back button
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="start_link")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        claim_text = "🎁 *Available Rewards*\n\n"
-        for _, channel_name, available_rewards in claimable_rewards:
-            claim_text += f"🔸 {channel_name}: {available_rewards} reward(s)\n"
-        
-        claim_text += "\nClick below to claim your rewards!"
-        
-        await update.message.reply_text(claim_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     
     async def admin_command(self, update: Update, context):
         """Handle /admin command for channel administrators."""
@@ -236,15 +455,53 @@ class TelegramReferralBot:
         user = update.effective_user
         
         if chat.type == 'private':
-            await update.message.reply_text(
+            # REMOTE ADMIN DASHBOARD
+            # Check if this is the super admin
+            if user.id == self.config.SUPER_ADMIN_ID:
+                channels = self.data_manager.get_all_channels()
+                
+                if not channels:
+                    await update.effective_message.reply_text("❌ No channels registered yet.")
+                    return
+                
+                message = "🛡️ *Remote Admin Dashboard*\n\nSelect a channel to view statistics:"
+                keyboard = []
+                
+                for c_id, c_data in channels.items():
+                    c_name = c_data.get('name', f'Channel {c_id}')
+                    keyboard.append([InlineKeyboardButton(f"📊 {c_name}", callback_data=f"admin_stats_{c_id}")])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.effective_message.reply_text(message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+                return
+
+            await update.effective_message.reply_text(
                 "❌ Admin commands can only be used in channels where you're an admin."
             )
             return
         
-        # Check if user is admin
-        chat_member = await context.bot.get_chat_member(chat.id, user.id)
-        if chat_member.status not in ['administrator', 'creator']:
-            await update.message.reply_text("❌ You need to be a channel admin to use this command.")
+        # Check permissions
+        is_admin = False
+        status_msg = "unknown"
+
+        # 1. Check if sent by the Channel itself (Anonymous Admin)
+        if update.effective_message.sender_chat and update.effective_message.sender_chat.id == chat.id:
+            is_admin = True
+            status_msg = "Channel Creator (Anonymous)"
+        else:
+            # 2. Check individual user status
+            try:
+                chat_member = await context.bot.get_chat_member(chat.id, user.id)
+                status_msg = chat_member.status
+                # logger.info(f"Admin CMD Check | Chat: {chat.title} | User: {user.id} | Status: {status_msg}")
+                
+                if chat_member.status in ['administrator', 'creator']:
+                    is_admin = True
+            except Exception as e:
+                logger.error(f"Error checking admin status: {e}")
+                
+        if not is_admin:
+            await update.effective_message.reply_text(f"❌ Permission Denied. Status: {status_msg}")
             return
         
         # Register or update channel
@@ -254,6 +511,7 @@ class TelegramReferralBot:
         
         admin_text = (
             f"🔧 *Channel Admin Panel*\n\n"
+            f"📺 *{chat.title}*\n"
             f"📊 *Channel Statistics:*\n"
             f"• Total users: {channel_stats.get('total_users', 0)}\n"
             f"• Active referrers: {channel_stats.get('active_referrers', 0)}\n"
@@ -264,12 +522,25 @@ class TelegramReferralBot:
             f"• Reward type: {self.config.REWARD_TYPE}\n"
         )
         
-        await update.message.reply_text(admin_text, parse_mode=ParseMode.MARKDOWN)
+        await update.effective_message.reply_text(admin_text, parse_mode=ParseMode.MARKDOWN)
     
     async def track_chat_member(self, update: Update, context):
         """Track when users join or leave channels."""
-        chat_member_update = update.chat_member
+        # SECURITY CHECK
         chat = update.effective_chat
+        val_chat_id = chat.id
+        
+        if chat.type in ['group', 'supergroup', 'channel']:
+             if val_chat_id not in self.config.ALLOWED_CHAT_IDS:
+                logger.warning(f"SECURITY: Bot active in unauthorized chat {val_chat_id} ({chat.title}). Leaving.")
+                try:
+                    await chat.leave()
+                except Exception as e:
+                    logger.error(f"Failed to leave unauthorized chat {val_chat_id}: {e}")
+                return
+
+        chat_member_update = update.chat_member
+        # chat = update.effective_chat # Already defined above
         user = chat_member_update.new_chat_member.user
         
         # Skip bot updates
@@ -279,67 +550,143 @@ class TelegramReferralBot:
         old_status = chat_member_update.old_chat_member.status
         new_status = chat_member_update.new_chat_member.status
         
+        # Capture invite link if available
+        invite_link = None
+        if hasattr(chat_member_update, 'invite_link') and chat_member_update.invite_link:
+            invite_link = chat_member_update.invite_link.invite_link
+        
         # User joined the channel
         if old_status in ['left', 'kicked'] and new_status in ['member', 'administrator', 'creator']:
-            await self._handle_user_join(chat.id, user.id, user.first_name)
+            await self._handle_user_join(chat.id, user.id, user.first_name, invite_link=invite_link)
         
         # User left the channel
         elif old_status in ['member', 'administrator', 'creator'] and new_status in ['left', 'kicked']:
             await self._handle_user_leave(chat.id, user.id)
     
-    async def _handle_user_join(self, chat_id: int, user_id: int, user_name: str):
+    async def _handle_user_join(self, chat_id: int, user_id: int, user_name: str, invite_link: str = None):
         """Handle when a user joins a channel."""
-        logger.info(f"User {user_id} joined channel {chat_id}")
+        logger.info(f"User {user_id} joined channel {chat_id} (Link: {invite_link})")
+        
+        # 1. Ensure user exists in our database immediately
+        self.data_manager.ensure_user_exists(user_id, username=user_name, first_name=user_name)
         
         # Check if this was a referral join
-        pending_referral = self.data_manager.get_pending_referral(user_id, chat_id)
+        referrer_id = None
         
+        # Case A: Pending referral (via deep link start param) (Priority)
+        pending_referral = self.data_manager.get_pending_referral(user_id, chat_id)
         if pending_referral:
-            # This was a referral join
             referrer_id = pending_referral['referrer_id']
-            self.referral_manager.process_successful_referral(referrer_id, chat_id, user_id)
             self.data_manager.remove_pending_referral(user_id, chat_id)
+            
+        # Case B: Invite Link (via direct channel join link)
+        elif invite_link:
+            referrer_id = self._get_referrer_from_link(invite_link)
+
+        # Process Referral if referrer found
+        if referrer_id:
+            logger.info(f"Processing referral: Referrer {referrer_id}, New User {user_id}")
+            
+            # Check if user already referred (prevent double counting validation)
+            # note: process_successful_referral blindly adds, so we should check logic if needed.
+            # But user WANTS to support re-joining for testing.
+            # The issue is "tracking fails".
+            
+            referral_count = self.referral_manager.process_successful_referral(referrer_id, chat_id, user_id)
             
             # Notify referrer
             try:
-                await self.application.bot.send_message(
-                    referrer_id,
-                    f"🎉 Great! Someone joined via your referral link!\n\n"
-                    f"Use /status to check your progress."
+                # INSTANT NOTIFICATION as requested
+                new_member_display = f"@{user_name}" if user_name else "Someone"
+                
+                message = (
+                    f"🚀 *New Referral!*\n\n"
+                    f"Hi! {new_member_display} just joined using your link!\n"
+                    f"📊 Total Referrals: {referral_count}/{self.config.REFERRAL_TARGET}\n"
                 )
+                
+                # Check for referral milestone
+                if referral_count >= self.config.REFERRAL_TARGET:
+                    message += (
+                        f"\n🏆 *TARGET REACHED!* 🏆\n"
+                        f"You have reached {self.config.REFERRAL_TARGET} referrals!\n"
+                        f"Use /claim to get your reward instructions."
+                    )
+                
+                await self.application.bot.send_message(referrer_id, message, parse_mode=ParseMode.MARKDOWN)
+                logger.info(f"Sent referral notification to {referrer_id}")
             except Exception as e:
                 logger.error(f"Failed to notify referrer {referrer_id}: {e}")
+        else:
+            logger.info(f"No referrer found for user {user_id} in channel {chat_id}. Link used: {invite_link}")
         
         # Generate REAL channel invite link for the new user
-        referral_link = await self._create_trackable_invite_link(user_id, chat_id)
+        target_channel_id = -1003869427941
         
-        # Send welcome message with referral link
-        try:
-            channel_name = self.data_manager.get_channel_info(chat_id).get('name', 'the channel')
-            welcome_message = (
-                f"🎉 Welcome to {channel_name}!\n\n"
-                f"🔗 Here's your unique referral link:\n"
-                f"`{referral_link}`\n\n"
-                f"Share this link to invite {self.config.REFERRAL_TARGET} friends "
-                f"and earn rewards!\n\n"
-                f"Use /status to track your progress."
-            )
+        # Force REUSE of existing link if available to avoid multiple links per user
+        user_data = self.data_manager.get_user_data(user_id)
+        referral_link = None
+        channel_key = str(target_channel_id)
+        
+        if user_data and 'channels' in user_data and channel_key in user_data['channels']:
+            referral_link = user_data['channels'][channel_key].get('referral_link')
             
+        if not referral_link:
+             referral_link = await self._create_trackable_invite_link(user_id, target_channel_id)
+        
+        # PREPARE MESSAGES
+        
+        # Message 1: The DM (Direct Message) - Ideal case
+        dm_message = (
+            f"Welcome to the EarnPro Elites, @{user_name}! 🚀\n"
+            f"Your journey to building a network starts here. 🌐\n\n"
+            f"🔗 *Here is your unique referral link for the channel:*\n"
+            f"`{referral_link}`\n\n"
+            f"Share this link to invite {self.config.REFERRAL_TARGET} friends and earn rewards!\n"
+            f"Use /status to track your progress.\n"
+            f"#YourReferralsYourNetwork"
+        )
+        
+        # Message 2: The Group Fallback - If DM fails
+        group_message = (
+            f"Welcome to the EarnPro Elites, @{user_name}! 🚀\n"
+            f"Your journey to building a network starts here. 🌐\n"
+            f"Tap 'Get my referral link' below to start the bot and claim your unique link.\n"
+            f"#YourReferralsYourNetwork"
+        )
+        
+        bot_username = self.config.BOT_USERNAME
+        deep_link = f"https://t.me/{bot_username}?start=getlink_{chat_id}"
+        
+        group_keyboard = [
+            [InlineKeyboardButton("Get my referral link", url=deep_link)]
+        ]
+        group_reply_markup = InlineKeyboardMarkup(group_keyboard)
+
+        # EXECUTION: Try DM first, then Fallback
+        # We try to send the DM. If it fails (e.g. Forbidden: bot was blocked by the user),
+        # we catch the exception and send the fallback message to the group.
+        try:
             await self.application.bot.send_message(
-                user_id,
-                welcome_message,
+                chat_id=user_id,
+                text=dm_message,
                 parse_mode=ParseMode.MARKDOWN
             )
+            logger.info(f"Sent welcome DM to user {user_id}")
+            
         except Exception as e:
-            logger.warning(f"Could not send welcome message to user {user_id} - they need to start the bot first: {e}")
-            # Store the referral link to send later when they start the bot
-            user_data = self.data_manager.get_user_data(user_id) or {'channels': {}}
-            channel_key = str(chat_id)
-            if channel_key not in user_data['channels']:
-                user_data['channels'][channel_key] = {}
-            user_data['channels'][channel_key]['pending_welcome'] = True
-            user_data['channels'][channel_key]['referral_link'] = referral_link
-            self.data_manager.save_user_data(user_id, user_data)
+            # 2. DM Failed (User hasn't started bot), send to Group
+            logger.info(f"Could not DM user {user_id} ({e}). Falling back to group message.")
+            try:
+                await self.application.bot.send_message(
+                    chat_id=chat_id, 
+                    text=group_message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=group_reply_markup
+                )
+                logger.info(f"Sent fallback welcome to group {chat_id}")
+            except Exception as e2:
+                logger.error(f"Failed to send welcome message to group {chat_id}: {e2}")
     
     async def _create_trackable_invite_link(self, user_id: int, chat_id: int) -> str:
         """Create a trackable invite link for the channel that actually invites people to the channel."""
@@ -348,7 +695,6 @@ class TelegramReferralBot:
             invite_link = await self.application.bot.create_chat_invite_link(
                 chat_id=chat_id,
                 name=f"Referral-{user_id}",  # Name to identify this link
-                member_limit=10000,  # High limit to allow many joins
                 creates_join_request=False  # Direct join, no approval needed
             )
             
@@ -359,6 +705,34 @@ class TelegramReferralBot:
             # Store the invite link mapping for tracking
             self._store_invite_link_mapping(invite_link.invite_link, user_id, chat_id, referral_code)
             
+            # CRITICAL FIX: Persist the link to the user's profile so it can be reused!
+            # If we don't do this, the bot will generate a new link every time the user checks.
+            try:
+                user_data = self.data_manager.get_user_data(user_id)
+                channel_key = str(chat_id)
+                
+                # Verify channel data structure exists
+                if not user_data:
+                    user_data = {'channels': {}}
+                if 'channels' not in user_data:
+                    user_data['channels'] = {}
+                if channel_key not in user_data['channels']:
+                     # Initialize if empty
+                     user_data['channels'][channel_key] = {
+                        'successful_referrals': 0,
+                        'rewards_claimed': 0,
+                        'referred_users': [],
+                        'referral_history': []
+                    }
+                
+                # SAVE THE LINK
+                user_data['channels'][channel_key]['referral_link'] = invite_link.invite_link
+                self.data_manager.save_user_data(user_id, user_data)
+                logger.info(f"Persisted referral link {invite_link.invite_link} for user {user_id}")
+                
+            except Exception as e_persist:
+                logger.error(f"Failed to persist referral link to user data: {e_persist}")
+
             logger.info(f"Created trackable invite link for user {user_id} in channel {chat_id}")
             return invite_link.invite_link
             
@@ -366,6 +740,29 @@ class TelegramReferralBot:
             logger.error(f"Failed to create invite link: {e}")
             # Fallback to bot link if invite link creation fails
             return self.referral_manager.generate_referral_link(user_id, chat_id)
+    
+    async def _get_referrer_from_link(self, invite_link: str) -> Optional[int]:
+        """Look up who created an invite link."""
+        try:
+            import json
+            import os
+            
+            mapping_file = "data/invite_links.json"
+            
+            if not os.path.exists(mapping_file):
+                return None
+            
+            with open(mapping_file, 'r') as f:
+                mappings = json.load(f)
+                
+            if invite_link in mappings:
+                return mappings[invite_link]['user_id']
+                
+            return None
+                
+        except Exception as e:
+            logger.error(f"Failed to lookup invite link: {e}")
+            return None
     
     def _store_invite_link_mapping(self, invite_link: str, user_id: int, chat_id: int, referral_code: str):
         """Store the mapping between invite link and user for tracking."""
@@ -493,6 +890,14 @@ class TelegramReferralBot:
                 reply_markup=None
             )
             await self._send_status_to_callback(query, context)
+        elif query.data == "start_link":
+            # Just run check_command info essentially, or better, reply with the link
+            # We can't easily "call" start_command from a callback without a message context often, 
+            # but we can edit the message or send a new one.
+            # Easiest is to send the help/link message again.
+            await self.start_command(update, context)
+        elif query.data == "mylink":
+            await self.mylink_command(update, context)
         elif query.data == "claim":
             await self.claim_command(update, context)
         elif query.data == "help":
@@ -500,6 +905,44 @@ class TelegramReferralBot:
         elif query.data.startswith("claim_"):
             channel_id = int(query.data.split("_")[1])
             await self._process_reward_claim(update, channel_id)
+        elif query.data == "admin_dashboard":
+             await self.admin_command(update, context) # Re-use logic
+        elif query.data.startswith("get_link_"):
+            channel_id = int(query.data.split("_")[2])
+            await self._process_get_link(update, channel_id)
+        elif query.data.startswith("admin_stats_"):
+            channel_id = int(query.data.split("_")[2])
+            await self._send_admin_stats_callback(query, channel_id)
+            
+    async def _send_admin_stats_callback(self, query, channel_id: int):
+        """Send admin stats for a specific channel via callback."""
+        # Verify admin
+        if query.from_user.id != self.config.SUPER_ADMIN_ID:
+             await query.edit_message_text("❌ Unauthorized.")
+             return
+
+        channel_info = self.data_manager.get_channel_info(channel_id)
+        channel_name = channel_info.get('name', 'Unknown Channel') if channel_info else 'Unknown Channel'
+        
+        channel_stats = self.referral_manager.get_channel_stats(channel_id)
+        
+        admin_text = (
+            f"🔧 *Channel Admin Panel*\n\n"
+            f"📺 *{channel_name}*\n"
+            f"📊 *Channel Statistics:*\n"
+            f"• Total users: {channel_stats.get('total_users', 0)}\n"
+            f"• Active referrers: {channel_stats.get('active_referrers', 0)}\n"
+            f"• Total referrals: {channel_stats.get('total_referrals', 0)}\n"
+            f"• Rewards claimed: {channel_stats.get('rewards_claimed', 0)}\n\n"
+            f"🎯 *Settings:*\n"
+            f"• Referral target: {self.config.REFERRAL_TARGET}\n"
+            f"• Reward type: {self.config.REWARD_TYPE}\n"
+        )
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Dashboard", callback_data="admin_dashboard")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(admin_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     
     async def _send_status_to_callback(self, query, context):
         """Send status response to callback query."""
@@ -579,10 +1022,46 @@ class TelegramReferralBot:
             await update.callback_query.edit_message_text(
                 f"❌ {result['message']}"
             )
+
+    async def _process_get_link(self, update: Update, channel_id: int):
+        """Process request to get referral link via button."""
+        user_id = update.effective_user.id
+        
+        # Generate the trackable link
+        referral_link = await self._create_trackable_invite_link(user_id, channel_id)
+        
+        channel_info = self.data_manager.get_channel_info(channel_id)
+        channel_name = channel_info.get('name', 'the channel') if channel_info else 'the channel'
+        
+        message = (
+            f"🔗 *Here is your unique referral link for {channel_name}:*\n\n"
+            f"`{referral_link}`\n\n"
+            f"Share this link to invite {self.config.REFERRAL_TARGET} friends and earn rewards!\n"
+            f"Use /status to track your progress.\n\n"
+            f"🆕 *New Member?*\n"
+            f"If you don't have an account on EarnPro yet, register at [earnpro.org](https://earnpro.org) using this code:\n"
+            f"`USRMH6RNBI3`"
+        )
+        
+        # Send as a new message to the user
+        await self.application.bot.send_message(
+            chat_id=user_id,
+            text=message,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Acknowledge the callback
+        await update.callback_query.answer("Link sent!")
     
     async def handle_message(self, update: Update, context):
         """Handle regular text messages."""
-        # For now, just acknowledge the message
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
+        logger.info(f"Received message in chat {chat_id} ({chat_type}) from {update.effective_user.first_name}")
+        
+        # Ignore messages from other bots
+        if update.effective_user.is_bot:
+            return
         # This could be expanded to handle other interactions
         pass
     

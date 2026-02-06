@@ -15,8 +15,9 @@ class Config:
         self.BOT_USERNAME = os.getenv('BOT_USERNAME', 'YourReferralBot')  # Set this to your bot's username
         
         # Referral settings
-        self.REFERRAL_TARGET = int(os.getenv('REFERRAL_TARGET', '10'))  # Number of referrals needed for reward
+        self.REFERRAL_TARGET = 10  # Hardcoded as per request
         self.REWARD_TYPE = os.getenv('REWARD_TYPE', 'Premium Access')  # Type of reward
+        self.SUPER_ADMIN_ID = 7803181156  # Hardcoded Super Admin for Remote Dashboard
         
         # Database settings
         self.DATA_BACKUP_INTERVAL = int(os.getenv('DATA_BACKUP_INTERVAL', '3600'))  # Backup interval in seconds
@@ -46,6 +47,11 @@ class Config:
         self.ENABLE_LEADERBOARD = os.getenv('ENABLE_LEADERBOARD', 'true').lower() == 'true'
         self.ENABLE_STATISTICS = os.getenv('ENABLE_STATISTICS', 'true').lower() == 'true'
         self.ENABLE_REWARDS = os.getenv('ENABLE_REWARDS', 'true').lower() == 'true'
+        
+        # Security: Whitelisted Chat IDs
+        # Channel: EarnPro Elites Channel (-1001897244942)
+        # Group: EarnPro Elites Group (-1003802752780)
+        self.ALLOWED_CHAT_IDS = [-1001897244942, -1003802752780]
         
         # Validation
         self._validate_config()

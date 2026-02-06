@@ -15,9 +15,14 @@ logger = logging.getLogger(__name__)
 class ReferralManager:
     """Manages all referral-related operations."""
     
-    def __init__(self):
+    def __init__(self, data_manager=None):
         """Initialize the referral manager."""
-        self.data_manager = DataManager()
+        try:
+            from data_manager import DataManager
+        except ImportError:
+            DataManager = None
+
+        self.data_manager = data_manager if data_manager else DataManager()
         self.config = Config()
     
     def generate_referral_link(self, user_id: int, channel_id: int) -> str:
@@ -28,10 +33,11 @@ class ReferralManager:
         # Store referral data
         self.data_manager.store_referral_code(referral_code, user_id, channel_id)
         
-        # For TeenzMovement channel, use the actual channel invite link
-        if channel_id == -1001817773133:  # TeenzMovement channel ID
-            # Create a trackable channel invite link
-            referral_link = f"https://t.me/TeenzMovement?start={referral_code}"
+        # EarnPro Elites Channel ID
+        if channel_id == -1003869427941:  
+            # For the channel, we prefer the bot deep link so users can get their own link
+            bot_username = self.config.BOT_USERNAME
+            referral_link = f"https://t.me/{bot_username}?start={referral_code}"
         else:
             # For other channels, create bot link
             bot_username = self.config.BOT_USERNAME
@@ -70,6 +76,8 @@ class ReferralManager:
         self.data_manager.save_user_data(referrer_id, referrer_data)
         
         logger.info(f"Processed successful referral: {referrer_id} -> {referred_user_id} in channel {channel_id}")
+        
+        return referrer_data['channels'][channel_key]['successful_referrals']
     
     def process_referral_leave(self, referrer_id: int, channel_id: int, left_user_id: int):
         """Process when a referred user leaves the channel."""
@@ -180,6 +188,11 @@ class ReferralManager:
     
     def get_channel_stats(self, channel_id: int) -> Dict:
         """Get overall statistics for a channel."""
+        # 1. OPTIMIZED PATH: Use DB aggregation if available
+        if hasattr(self.data_manager, 'get_channel_aggregate_stats'):
+            return self.data_manager.get_channel_aggregate_stats(channel_id)
+
+        # 2. LEGACY PATH: Iterate all users (Inefficient)
         all_users = self.data_manager.get_all_users()
         channel_key = str(channel_id)
         
