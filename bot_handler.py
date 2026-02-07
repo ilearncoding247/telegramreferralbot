@@ -90,9 +90,9 @@ class TelegramReferralBot:
         """Show detailed stats for a specific channel (used by dynamic command)."""
         # Security: Only allow admins to check ANY channel? 
         # Or normal users to check THEIR status?
-        # Context suggests User wants to check "EarnPRO Elites Channel" stats.
+        # Context suggests User wants to check the EarnPro channel stats.
         # Assuming they want THEIR stats in that channel, OR overall admin stats if they are admin?
-        # User request: "manual way /earnproeliteschannel" -> likely implied "Status for this channel".
+        # User request: manual channel status command -> likely implied "Status for this channel".
         
         user_id = update.effective_user.id
         
@@ -223,7 +223,7 @@ class TelegramReferralBot:
                 await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
             
             # ENSURE USER HAS A REFERRAL LINK
-            target_channel_id = -1003869427941
+            target_channel_id = -1001897244942
             referral_link = None
             
             # Check existing
@@ -251,7 +251,7 @@ class TelegramReferralBot:
 
             # Send main welcome message with the link
             welcome_message = (
-                f"🎉 Welcome to the EarnPro Elites Team, {user.first_name}!\n\n"
+                f"🎉 Welcome to EarnPro, {user.first_name}!\n\n"
                 f"Your journey to building a network starts here. 🌐\n\n"
                 f"🔗 *Here is your unique referral link:*\n"
                 f"`{referral_link}`\n\n"
@@ -302,7 +302,7 @@ class TelegramReferralBot:
         user_id = update.effective_user.id
         user_data = self.data_manager.get_user_data(user_id)
         
-        target_channel_id = -1003869427941
+        target_channel_id = -1001897244942
         if not user_data or not user_data.get('channels'):
             await update.effective_message.reply_text(
                 "📊 *Your Referral Status*\n\n"
@@ -355,12 +355,12 @@ class TelegramReferralBot:
                 has_primary_channel = True
             add_channel_status(channel_id, channel_data)
         
-        # If the user has data but NOT for the new primary ID, implies they are legacy.
-        # But if the loop above covered "EarnPro Elites Channel" via the old ID, `processed_channel_names` handles it.
+           # If the user has data but NOT for the new primary ID, implies they are legacy.
+           # But if the loop above covered the legacy channel name via the old ID, `processed_channel_names` handles it.
         # If nothing was added (e.g. data corrupt), add default.
         if not processed_channel_names:
              # Show default if new user with empty channels
-             status_text += f"🔶 *EarnPro Elites Channel*\n"
+               status_text += f"🔶 *EarnPro*\n"
              status_text += f"   • Referrals: 0/{self.config.REFERRAL_TARGET}\n"
              status_text += f"   • Progress: {utils.get_progress_bar(0, self.config.REFERRAL_TARGET)}\n"
              status_text += f"\n🎯 Need {self.config.REFERRAL_TARGET} more referrals to unlock rewards."
@@ -378,7 +378,7 @@ class TelegramReferralBot:
         user_id = update.effective_user.id
         user_data = self.data_manager.get_user_data(user_id)
         
-        target_channel_id = -1003869427941
+        target_channel_id = -1001897244942
         channel_key = str(target_channel_id)
         
         successful_referrals = 0
@@ -388,11 +388,11 @@ class TelegramReferralBot:
             if channel_key in user_data['channels']:
                 successful_referrals = user_data['channels'][channel_key].get('successful_referrals', 0)
             else:
-                # Fallback check for any channel named "EarnPro Elites Channel" (Old ID)
-                # Since we want to honor referrals made on the old ID
+                # Fallback check for any channel using the legacy name (old ID)
+                # Honor referrals recorded under the old channel name or the new one
                 for c_id, c_data in user_data['channels'].items():
                      c_info = self.data_manager.get_channel_info(c_id)
-                     if c_info and c_info.get('name') == "EarnPro Elites Channel":
+                     if c_info and c_info.get('name') in ("EarnPro Elites Channel", "EarnPro"):
                          successful_referrals = max(successful_referrals, c_data.get('successful_referrals', 0))
         
         target = self.config.REFERRAL_TARGET
@@ -424,7 +424,7 @@ class TelegramReferralBot:
         """Handle /mylink command and button."""
         user_id = update.effective_user.id
         user_data = self.data_manager.get_user_data(user_id)
-        target_channel_id = -1003869427941
+        target_channel_id = -1001897244942
         channel_key = str(target_channel_id)
         
         referral_link = None
@@ -621,7 +621,7 @@ class TelegramReferralBot:
             logger.info(f"No referrer found for user {user_id} in channel {chat_id}. Link used: {invite_link}")
         
         # Generate REAL channel invite link for the new user
-        target_channel_id = -1003869427941
+        target_channel_id = -1001897244942
         
         # Force REUSE of existing link if available to avoid multiple links per user
         user_data = self.data_manager.get_user_data(user_id)
@@ -638,7 +638,7 @@ class TelegramReferralBot:
         
         # Message 1: The DM (Direct Message) - Ideal case
         dm_message = (
-            f"Welcome to the EarnPro Elites, @{user_name}! 🚀\n"
+            f"Welcome to EarnPro, @{user_name}! 🚀\n"
             f"Your journey to building a network starts here. 🌐\n\n"
             f"🔗 *Here is your unique referral link for the channel:*\n"
             f"`{referral_link}`\n\n"
@@ -649,7 +649,7 @@ class TelegramReferralBot:
         
         # Message 2: The Group Fallback - If DM fails
         group_message = (
-            f"Welcome to the EarnPro Elites, @{user_name}! 🚀\n"
+            f"Welcome to EarnPro, @{user_name}! 🚀\n"
             f"Your journey to building a network starts here. 🌐\n"
             f"Tap 'Get my referral link' below to start the bot and claim your unique link.\n"
             f"#YourReferralsYourNetwork"

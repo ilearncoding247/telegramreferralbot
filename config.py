@@ -12,7 +12,7 @@ class Config:
         """Initialize configuration with default values."""
         
         # Bot settings
-        self.BOT_USERNAME = os.getenv('BOT_USERNAME', 'YourReferralBot')  # Set this to your bot's username
+        self.BOT_USERNAME = os.getenv('BOT_USERNAME', 'officialearnpro')  # Set this to your bot's username
         
         # Referral settings
         self.REFERRAL_TARGET = 10  # Hardcoded as per request
@@ -49,9 +49,10 @@ class Config:
         self.ENABLE_REWARDS = os.getenv('ENABLE_REWARDS', 'true').lower() == 'true'
         
         # Security: Whitelisted Chat IDs
-        # Channel: EarnPro Elites Channel (-1001897244942)
-        # Group: EarnPro Elites Group (-1003802752780)
-        self.ALLOWED_CHAT_IDS = [-1001897244942, -1003802752780]
+        # Channel: Official EarnPro Channel (-1001897244942, https://t.me/officialearnpro)
+        # Group: EarnPro Chats Group (-1003629306518, https://t.me/earnprochats)
+        # Removed legacy/previous group IDs that were banned.
+        self.ALLOWED_CHAT_IDS = [-1001897244942, -1003629306518]
         
         # Validation
         self._validate_config()

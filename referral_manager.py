@@ -33,8 +33,8 @@ class ReferralManager:
         # Store referral data
         self.data_manager.store_referral_code(referral_code, user_id, channel_id)
         
-        # EarnPro Elites Channel ID
-        if channel_id == -1003869427941:  
+        # Official EarnPro Channel ID
+        if channel_id == -1001897244942:
             # For the channel, we prefer the bot deep link so users can get their own link
             bot_username = self.config.BOT_USERNAME
             referral_link = f"https://t.me/{bot_username}?start={referral_code}"
