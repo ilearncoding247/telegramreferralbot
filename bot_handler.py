@@ -355,12 +355,12 @@ class TelegramReferralBot:
                 has_primary_channel = True
             add_channel_status(channel_id, channel_data)
         
-           # If the user has data but NOT for the new primary ID, implies they are legacy.
-           # But if the loop above covered the legacy channel name via the old ID, `processed_channel_names` handles it.
+        # If the user has data but NOT for the new primary ID, implies they are legacy.
+        # But if the loop above covered the legacy channel name via the old ID, `processed_channel_names` handles it.
         # If nothing was added (e.g. data corrupt), add default.
         if not processed_channel_names:
              # Show default if new user with empty channels
-               status_text += f"🔶 *EarnPro*\n"
+             status_text += f"🔶 *EarnPro*\n"
              status_text += f"   • Referrals: 0/{self.config.REFERRAL_TARGET}\n"
              status_text += f"   • Progress: {utils.get_progress_bar(0, self.config.REFERRAL_TARGET)}\n"
              status_text += f"\n🎯 Need {self.config.REFERRAL_TARGET} more referrals to unlock rewards."
