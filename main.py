@@ -11,7 +11,6 @@ Supports two modes:
 import os
 import sys
 import logging
-import asyncio
 from bot_handler import TelegramReferralBot
 
 # Load environment variables (optional in prod, vital in dev)
@@ -28,27 +27,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-async def start_webhook_mode(bot):
+def start_webhook_mode(bot):
     """Start bot in webhook mode (for production)."""
     from webhook_server import WebhookServer
     
     webhook_server = WebhookServer(bot)
     
-    # Setup webhook with Telegram
-    success = await webhook_server.setup_webhook()
-    if not success:
-        logger.error("Failed to setup webhook!")
-        return False
-    
-    logger.info("Webhook mode started. Bot is listening for updates...")
-    
-    # Start the Flask server (blocking)
-    webhook_server.run()
+    logger.info("Starting bot in webhook mode...")
+    return webhook_server.run()
 
 def start_polling_mode(bot):
     """Start bot in polling mode (for local development)."""
     logger.info("Starting bot in polling mode...")
-    bot.start()
+    try:
+        bot.start()
+        return 0
+    except Exception as e:
+        logger.error(f"Error in polling mode: {e}", exc_info=True)
+        return 1
 
 def main():
     """Main function to start the Telegram bot."""
@@ -58,7 +54,7 @@ def main():
     if not bot_token:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
         logger.error("Please set your bot token: export TELEGRAM_BOT_TOKEN='your_token_here'")
-        return
+        return 1
     
     # Initialize the bot
     try:
@@ -74,17 +70,15 @@ def main():
         if webhook_mode:
             logger.info("Mode: Webhook (Production)")
             # Run webhook mode
-            asyncio.run(start_webhook_mode(bot))
+            return start_webhook_mode(bot)
         else:
             logger.info("Mode: Polling (Development)")
             # Run polling mode
-            start_polling_mode(bot)
+            return start_polling_mode(bot)
             
     except Exception as e:
         logger.error(f"Failed to start bot: {e}", exc_info=True)
         return 1
-    
-    return 0
 
 if __name__ == '__main__':
     sys.exit(main())
