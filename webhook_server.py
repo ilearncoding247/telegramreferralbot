@@ -167,10 +167,4 @@ class WebhookServer:
 
             return False
     
-    def run(self):
-        """Run the webhook server."""
-        port = int(os.getenv('PORT', self.port))
-        host = '0.0.0.0'
-        
-        logger.info(f"Starting webhook server on {host}:{port}")
-        self.app.run(host=host, port=port, debug=False)
+
