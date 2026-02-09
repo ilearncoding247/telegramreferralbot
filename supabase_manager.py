@@ -129,6 +129,48 @@ class SupabaseManager:
             logger.error(f"Supabase error ensure_user_exists: {e}")
             return {}
 
+    def get_all_users(self) -> Dict[str, Dict]:
+        """Get all users with their channel data. Reconstructs legacy format."""
+        try:
+            # 1. Fetch all users
+            # Note: Supabase limits rows returned (default 1000). 
+            # For production with >1000 users, we'd need pagination.
+            users_res = self.supabase.table("telegram_users").select("*").execute()
+            
+            # 2. Fetch all channel mappings
+            channels_res = self.supabase.table("telegram_user_channels").select("*").execute()
+            
+            # 3. Build the dict
+            users_dict = {}
+            for u in users_res.data:
+                # the old format used str(user_id) as key in the big json
+                uid_str = str(u['user_id'])
+                users_dict[uid_str] = {
+                    'user_id': u['user_id'],
+                    'username': u.get('username'),
+                    'first_name': u.get('first_name'),
+                    'joined_at': u.get('joined_at'),
+                    'last_updated': u.get('last_active'),
+                    'channels': {}
+                }
+                
+            for c in channels_res.data:
+                uid_str = str(c['user_id'])
+                if uid_str in users_dict:
+                    cid = str(c['channel_id'])
+                    users_dict[uid_str]['channels'][cid] = {
+                        'referral_link': c.get('referral_link'),
+                        'successful_referrals': c.get('successful_referrals', 0),
+                        'rewards_claimed': c.get('rewards_claimed', 0),
+                        'referred_users': []
+                    }
+            
+            return users_dict
+            
+        except Exception as e:
+            logger.error(f"Supabase error get_all_users: {e}")
+            return {}
+
     # ---------------------------------------------------------
     # CHANNEL MANAGEMENT
     # ---------------------------------------------------------

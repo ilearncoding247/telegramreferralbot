@@ -33,15 +33,9 @@ class ReferralManager:
         # Store referral data
         self.data_manager.store_referral_code(referral_code, user_id, channel_id)
         
-        # Official EarnPro Channel ID
-        if channel_id == -1001897244942:
-            # For the channel, we prefer the bot deep link so users can get their own link
-            bot_username = self.config.BOT_USERNAME
-            referral_link = f"https://t.me/{bot_username}?start={referral_code}"
-        else:
-            # For other channels, create bot link
-            bot_username = self.config.BOT_USERNAME
-            referral_link = f"https://t.me/{bot_username}?start={referral_code}"
+        # Generate bot link as fallback (or primary if not using direct invites)
+        bot_username = self.config.BOT_USERNAME.replace('@', '') # Ensure no @ prefix
+        referral_link = f"https://t.me/{bot_username}?start={referral_code}"
         
         logger.info(f"Generated referral link for user {user_id} in channel {channel_id}")
         return referral_link

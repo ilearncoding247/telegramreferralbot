@@ -532,12 +532,12 @@ class TelegramReferralBot:
         
         if chat.type in ['group', 'supergroup', 'channel']:
              if val_chat_id not in self.config.ALLOWED_CHAT_IDS:
-                logger.warning(f"SECURITY: Bot active in unauthorized chat {val_chat_id} ({chat.title}). Leaving.")
-                try:
-                    await chat.leave()
-                except Exception as e:
-                    logger.error(f"Failed to leave unauthorized chat {val_chat_id}: {e}")
-                return
+                logger.warning(f"SECURITY: Bot active in unauthorized chat {val_chat_id} ({chat.title}).")
+                # try:
+                #     await chat.leave()
+                # except Exception as e:
+                #     logger.error(f"Failed to leave unauthorized chat {val_chat_id}: {e}")
+                # return
 
         chat_member_update = update.chat_member
         # chat = update.effective_chat # Already defined above
@@ -737,7 +737,7 @@ class TelegramReferralBot:
             return invite_link.invite_link
             
         except Exception as e:
-            logger.error(f"Failed to create invite link: {e}")
+            logger.error(f"Failed to create invite link for chat {chat_id}: {e}", exc_info=True)
             # Fallback to bot link if invite link creation fails
             return self.referral_manager.generate_referral_link(user_id, chat_id)
     
