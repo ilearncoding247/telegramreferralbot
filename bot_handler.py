@@ -11,6 +11,7 @@ from telegram.constants import ParseMode
 from referral_manager import ReferralManager
 from supabase_manager import SupabaseManager
 from config import Config
+from messages import BotMessages
 import utils
 
 logger = logging.getLogger(__name__)
@@ -253,26 +254,20 @@ class TelegramReferralBot:
                     referral_link = self.referral_manager.generate_referral_link(user.id, target_channel_id)
 
             # Send main welcome message with the link
-            welcome_message = (
-                f"🎉 Welcome to EarnPro, {user.first_name}!\n\n"
-                f"Your journey to building a network starts here. 🌐\n\n"
-                f"🔗 *Here is your unique referral link:*\n"
-                f"`{referral_link}`\n\n"
-                f"1. Copy this link.\n"
-                f"2. Share it with your friends.\n"
-                f"3. When they join the channel, you get credit!\n\n"
-                f"🎯 Goal: Invite {self.config.REFERRAL_TARGET} friends to earn rewards.\n"
-                f"#YourReferralsYourNetwork"
+            welcome_message = BotMessages.WELCOME_PRIVATE.format(
+                first_name=user.first_name,
+                referral_link=referral_link,
+                target=self.config.REFERRAL_TARGET
             )
             
             # Updated Buttons as per specific user request: Start, Status, Get Reward, Help
             keyboard = [
                 # "Start" is technically what we just did, but we can offer a button to re-generate/show link
-                [InlineKeyboardButton("🔗 Create Link / View Link", callback_data="start_link")], 
-                [InlineKeyboardButton("� My Link", callback_data="mylink")],
-                [InlineKeyboardButton("�📊 Status", callback_data="status")],
-                [InlineKeyboardButton("🎁 Get Reward", callback_data="claim")],
-                [InlineKeyboardButton("❓ Help", callback_data="help")]
+                [InlineKeyboardButton(BotMessages.BTN_CREATE_LINK, callback_data="start_link")], 
+                [InlineKeyboardButton(BotMessages.BTN_MY_LINK, callback_data="mylink")],
+                [InlineKeyboardButton(BotMessages.BTN_STATUS, callback_data="status")],
+                [InlineKeyboardButton(BotMessages.BTN_GET_REWARD, callback_data="claim")],
+                [InlineKeyboardButton(BotMessages.BTN_HELP, callback_data="help")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -284,20 +279,7 @@ class TelegramReferralBot:
     
     async def help_command(self, update: Update, context):
         """Handle /help command."""
-        target = self.config.REFERRAL_TARGET
-        help_text = (
-            "🤖 *Referral Bot Commands*\n\n"
-            "• `/start` - **Create/View Link**: Generates your unique referral link.\n"
-            "• `/status` - **Check Status**: Shows how many users have joined via your link.\n"
-            "• `/mylink` - **My Link**: Shows your unique referral link.\n"
-            "• `/claim` - **Get Reward**: If you have referrals, tells you how to redeem.\n"
-            "• `/help` - **Help**: Shows this explanation.\n\n"
-            "*How to Earn:*\n"
-            "1️⃣ Get your link with /start\n"
-            f"2️⃣ Invite {target} friends to the Channel\n"
-            "3️⃣ Use /claim to get redemption instructions!"
-        )
-        
+        help_text = BotMessages.HELP_TEXT.format(target=self.config.REFERRAL_TARGET)
         await update.effective_message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
     
     async def status_command(self, update: Update, context):
@@ -308,14 +290,12 @@ class TelegramReferralBot:
         target_channel_id = -1001897244942
         if not user_data or not user_data.get('channels'):
             await update.effective_message.reply_text(
-                "📊 *Your Referral Status*\n\n"
-                "You haven't joined any channels yet.\n"
-                "Use a referral link to get started!",
+                BotMessages.STATUS_EMPTY,
                 parse_mode=ParseMode.MARKDOWN
             )
             return
         
-        status_text = "📊 *Your Referral Status*\n\n"
+        status_text = BotMessages.STATUS_HEADER
         
         # Track processed channels to avoid duplicates if ID migration happened
         processed_channel_names = set()
@@ -338,16 +318,19 @@ class TelegramReferralBot:
             rew_claimed = c_data.get('rewards_claimed', 0)
             
             nonlocal status_text
-            status_text += f"🔸 *{c_name}*\n"
-            status_text += f"   • Referrals: {succ_referrals}/{targ}\n"
-            status_text += f"   • Progress: {utils.get_progress_bar(succ_referrals, targ)}\n"
-            status_text += f"   • Rewards claimed: {rew_claimed}\n"
+            status_text += BotMessages.STATUS_CHANNEL_LINE.format(channel_name=c_name)
+            status_text += BotMessages.STATUS_DETAILS.format(
+                count=succ_referrals,
+                target=targ,
+                progress_bar=utils.get_progress_bar(succ_referrals, targ),
+                claimed=rew_claimed
+            )
             
             if succ_referrals >= targ:
-                status_text += "   • ✅ Ready to claim reward!\n"
+                status_text += BotMessages.STATUS_READY_TO_CLAIM
             else:
                 rem = targ - succ_referrals
-                status_text += f"   • 🎯 Need {rem} more referrals\n"
+                status_text += BotMessages.STATUS_NEED_MORE.format(rem=rem)
             
             status_text += "\n"
             return True
@@ -369,8 +352,8 @@ class TelegramReferralBot:
              status_text += f"\n🎯 Need {self.config.REFERRAL_TARGET} more referrals to unlock rewards."
         
         keyboard = [
-            [InlineKeyboardButton("🎁 Get Reward", callback_data="claim")],
-            [InlineKeyboardButton("🔄 Refresh", callback_data="status")]
+            [InlineKeyboardButton(BotMessages.BTN_GET_REWARD, callback_data="claim")],
+            [InlineKeyboardButton(BotMessages.BTN_REFRESH, callback_data="status")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -402,23 +385,17 @@ class TelegramReferralBot:
         
         if successful_referrals >= target:
             # ELIGIBLE
-            claim_text = (
-                "🏆 *Congratulations! You are eligible for rewards!* 🏆\n\n"
-                f"You have referred {successful_referrals} people.\n\n"
-                "👇 **HOW TO REDEEM:**\n"
-                "1. Log into your [EarnPro Dashboard](https://earnpro.org/dashboard).\n"
-                "2. Go to the 'Rewards' section.\n"
-                "3. Enter your Telegram Username or ID to verify.\n\n"
-                f"Your Telegram ID: `{user_id}`"
+            claim_text = BotMessages.CLAIM_ELIGIBLE.format(
+                count=successful_referrals,
+                user_id=user_id
             )
         else:
             # NOT ELIGIBLE
             remaining = target - successful_referrals
-            claim_text = (
-                "🔒 *Rewards Locked*\n\n"
-                f"You have referred {successful_referrals} people.\n"
-                f"You need **{target} referrals** to unlock rewards.\n\n"
-                f"Keep inviting! You only need {remaining} more!"
+            claim_text = BotMessages.CLAIM_LOCKED.format(
+                count=successful_referrals,
+                target=target,
+                rem=remaining
             )
             
         await update.effective_message.reply_text(claim_text, parse_mode=ParseMode.MARKDOWN)
@@ -435,19 +412,12 @@ class TelegramReferralBot:
             referral_link = user_data['channels'][channel_key].get('referral_link')
             
         if referral_link:
-             message = (
-                 f"🔗 *Your Unique Referral Link:*\n\n"
-                 f"`{referral_link}`\n\n"
-                 f"Tap to copy and share!"
-             )
+             message = BotMessages.MY_LINK_MESSAGE.format(referral_link=referral_link)
         else:
-             message = (
-                 "⚠️ You don't have a referral link yet.\n"
-                 "Use /start to generate one!"
-             )
+             message = BotMessages.MY_LINK_MISSING
         
         # Add back button
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="start_link")]]
+        keyboard = [[InlineKeyboardButton(BotMessages.BTN_BACK_MENU, callback_data="start_link")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.effective_message.reply_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
@@ -602,18 +572,16 @@ class TelegramReferralBot:
                 # INSTANT NOTIFICATION as requested
                 new_member_display = f"@{user_name}" if user_name else "Someone"
                 
-                message = (
-                    f"🚀 *New Referral!*\n\n"
-                    f"Hi! {new_member_display} just joined using your link!\n"
-                    f"📊 Total Referrals: {referral_count}/{self.config.REFERRAL_TARGET}\n"
+                message = BotMessages.REFERRAL_NOTIFICATION.format(
+                    new_member=new_member_display,
+                    count=referral_count,
+                    target=self.config.REFERRAL_TARGET
                 )
                 
                 # Check for referral milestone
                 if referral_count >= self.config.REFERRAL_TARGET:
-                    message += (
-                        f"\n🏆 *TARGET REACHED!* 🏆\n"
-                        f"You have reached {self.config.REFERRAL_TARGET} referrals!\n"
-                        f"Use /claim to get your reward instructions."
+                    message += BotMessages.REFERRAL_MILESTONE_REACHED.format(
+                        target=self.config.REFERRAL_TARGET
                     )
                 
                 await self.application.bot.send_message(referrer_id, message, parse_mode=ParseMode.MARKDOWN)
@@ -640,29 +608,20 @@ class TelegramReferralBot:
         # PREPARE MESSAGES
         
         # Message 1: The DM (Direct Message) - Ideal case
-        dm_message = (
-            f"Welcome to EarnPro, @{user_name}! 🚀\n"
-            f"Your journey to building a network starts here. 🌐\n\n"
-            f"🔗 *Here is your unique referral link for the channel:*\n"
-            f"`{referral_link}`\n\n"
-            f"Share this link to invite {self.config.REFERRAL_TARGET} friends and earn rewards!\n"
-            f"Use /status to track your progress.\n"
-            f"#YourReferralsYourNetwork"
+        dm_message = BotMessages.WELCOME_PRIVATE.format(
+            first_name=user_name,
+            referral_link=referral_link,
+            target=self.config.REFERRAL_TARGET
         )
         
         # Message 2: The Group Fallback - If DM fails
-        group_message = (
-            f"Welcome to EarnPro, @{user_name}! 🚀\n"
-            f"Your journey to building a network starts here. 🌐\n"
-            f"Tap 'Get my referral link' below to start the bot and claim your unique link.\n"
-            f"#YourReferralsYourNetwork"
-        )
+        group_message = BotMessages.WELCOME_CHANNEL_FALLBACK.format(user_name=user_name)
         
         bot_username = self.config.BOT_USERNAME
         deep_link = f"https://t.me/{bot_username}?start=getlink_{chat_id}"
         
         group_keyboard = [
-            [InlineKeyboardButton("Get my referral link", url=deep_link)]
+            [InlineKeyboardButton(BotMessages.BTN_CHANNEL_GET_LINK, url=deep_link)]
         ]
         group_reply_markup = InlineKeyboardMarkup(group_keyboard)
 
