@@ -53,6 +53,9 @@ class TelegramReferralBot:
         # Handle metrics and tracking
         self.application.add_handler(ChatMemberHandler(self.track_chat_member, ChatMemberHandler.CHAT_MEMBER))
         
+        # Callback query handler for buttons
+        self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+        
         # Fallback handler for dynamic channel commands (e.g. /MyChannelName)
         # We capture text messages starting with '/' that aren't other commands
         self.application.add_handler(MessageHandler(filters.COMMAND, self.dynamic_channel_command))
