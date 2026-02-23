@@ -153,14 +153,23 @@ class WebhookServer:
         host = '0.0.0.0'
         logger.info(f"Starting webhook server on {host}:{port}")
         
-        # Create event loop for processing updates
+        # Create and start the event loop in a separate thread
         self.loop = asyncio.new_event_loop()
+        
+        def run_async_loop(loop):
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+            
+        loop_thread = threading.Thread(target=run_async_loop, args=(self.loop,), daemon=True)
+        loop_thread.start()
+        logger.info("Asyncio event loop started in background thread.")
         
         # Start Flask in main thread
         try:
             self.app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
         except Exception as e:
             logger.error(f"Failed to start webhook server: {e}", exc_info=True)
+            self.loop.stop()
             return 1
         
         return 0
