@@ -1,5 +1,5 @@
 python-telegram-bot>=21.6
-
 supabase>=2.0.0
 python-dotenv
 Flask>=2.3.0
+websockets>=13.0

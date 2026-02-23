@@ -46,7 +46,7 @@ class WebhookServer:
                 update = Update.de_json(data, self.bot.application.bot)
                 
                 if update:
-                    logger.debug(f"Received update: {update.update_id}")
+                    logger.info(f"Received update: {update.update_id}")
                     # Schedule the update to be processed by the application
                     if self.loop:
                         asyncio.run_coroutine_threadsafe(
@@ -121,43 +121,29 @@ class WebhookServer:
         logger.info(f"Starting webhook server on {host}:{port}")
         self.app.run(host=host, port=port, debug=False, use_reloader=False)
     
+    async def _init_bot(self):
+        """Internal helper to initialize and start the bot on the correct loop."""
+        await self.bot.application.initialize()
+        await self.bot.application.post_init(self.bot.application)
+        await self.bot.application.start()
+        success = await self.setup_webhook()
+        if success:
+            logger.info("Webhook mode started. Bot is listening for updates...")
+        else:
+            logger.error("Failed to setup webhook during initialization!")
+
     def run(self):
         """Run the webhook server and application."""
-        # Initialize the application synchronously from the main event loop
-        async def init():
-            await self.bot.application.initialize()
-            await self.bot.application.post_init(self.bot.application)
-            success = await self.setup_webhook()
-            if not success:
-                logger.error("Failed to setup webhook!")
-                return False
-            logger.info("Webhook mode started. Bot is listening for updates...")
-            return True
-        
-        # Run initialization
-        try:
-            # Create a new event loop for initialization
-            init_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(init_loop)
-            result = init_loop.run_until_complete(init())
-            init_loop.close()
-            
-            if not result:
-                return 1
-        except Exception as e:
-            logger.error(f"Failed to initialize: {e}", exc_info=True)
-            return 1
-        
-        # Create a separate thread for the Flask app
         port = int(os.getenv('PORT', self.port))
         host = '0.0.0.0'
-        logger.info(f"Starting webhook server on {host}:{port}")
         
         # Create and start the event loop in a separate thread
         self.loop = asyncio.new_event_loop()
         
         def run_async_loop(loop):
             asyncio.set_event_loop(loop)
+            # Initialize bot components on this specific loop
+            loop.run_until_complete(self._init_bot())
             loop.run_forever()
             
         loop_thread = threading.Thread(target=run_async_loop, args=(self.loop,), daemon=True)
@@ -166,10 +152,12 @@ class WebhookServer:
         
         # Start Flask in main thread
         try:
+            logger.info(f"Starting Flask webhook server on {host}:{port}")
             self.app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
         except Exception as e:
             logger.error(f"Failed to start webhook server: {e}", exc_info=True)
-            self.loop.stop()
+            if self.loop:
+                self.loop.stop()
             return 1
         
         return 0
